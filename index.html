@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -441,4 +440,359 @@
     }
 
     function formatDisplayDate(dateStr) {
-      const t
+      const today = getTodayDateString(0);
+      const yesterday = getTodayDateString(-1);
+      if (dateStr === today) return 'Hari Ini';
+      if (dateStr === yesterday) return 'Kemarin';
+
+      const [year, month, day] = dateStr.split('-');
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+      return `${parseInt(day, 10)} ${months[parseInt(month, 10) - 1]} ${year}`;
+    }
+
+    function updateHeaderDate() {
+      const now = new Date();
+      const options = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' };
+      document.getElementById('currentDateLabel').textContent = now.toLocaleDateString('id-ID', options);
+    }
+
+    function getCategoryMeta(type, categoryId) {
+      const list = CATEGORIES[type] || [];
+      return list.find(c => c.id === categoryId) || {
+        id: 'other',
+        name: 'Lainnya',
+        icon: 'circle-dot',
+        color: 'bg-slate-500',
+        badgeBg: 'bg-slate-100',
+        badgeText: 'text-slate-600'
+      };
+    }
+
+    // --- RENDERING UI ---
+    function renderApp() {
+      renderSummary();
+      renderCategoryBreakdown();
+      renderTransactionList();
+      lucide.createIcons();
+    }
+
+    function renderSummary() {
+      const income = transactions
+        .filter(t => t.type === 'income')
+        .reduce((sum, t) => sum + t.amount, 0);
+
+      const expense = transactions
+        .filter(t => t.type === 'expense')
+        .reduce((sum, t) => sum + t.amount, 0);
+
+      const balance = income - expense;
+
+      const balanceEl = document.getElementById('totalBalance');
+      const incomeEl = document.getElementById('totalIncome');
+      const expenseEl = document.getElementById('totalExpense');
+      const eyeIcon = document.getElementById('eyeIcon');
+
+      if (isBalanceHidden) {
+        balanceEl.textContent = 'Rp ••••••••';
+        incomeEl.textContent = 'Rp ••••••';
+        expenseEl.textContent = 'Rp ••••••';
+        eyeIcon.setAttribute('data-lucide', 'eye-off');
+      } else {
+        balanceEl.textContent = formatRupiah(balance);
+        incomeEl.textContent = formatRupiah(income);
+        expenseEl.textContent = formatRupiah(expense);
+        eyeIcon.setAttribute('data-lucide', 'eye');
+      }
+    }
+
+    function renderCategoryBreakdown() {
+      const expenses = transactions.filter(t => t.type === 'expense');
+      const totalExpense = expenses.reduce((sum, t) => sum + t.amount, 0);
+      const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
+
+      const ratioLabel = document.getElementById('expenseRatioLabel');
+      const barContainer = document.getElementById('categoryBarContainer');
+      const legendContainer = document.getElementById('categoryLegend');
+
+      if (totalIncome > 0) {
+        const pct = Math.round((totalExpense / totalIncome) * 100);
+        ratioLabel.textContent = `${pct}% dari pemasukan`;
+      } else {
+        ratioLabel.textContent = totalExpense > 0 ? 'Belum ada pemasukan' : 'Belum ada pengeluaran';
+      }
+
+      if (totalExpense === 0) {
+        barContainer.innerHTML = `<div class="w-full h-full bg-slate-100"></div>`;
+        legendContainer.innerHTML = `<p class="text-xs text-slate-400">Catat pengeluaran untuk melihat grafik kategori.</p>`;
+        return;
+      }
+
+      // Group expenses by category
+      const grouped = {};
+      expenses.forEach(tx => {
+        grouped[tx.category] = (grouped[tx.category] || 0) + tx.amount;
+      });
+
+      // Sort descending
+      const sortedCategories = Object.entries(grouped)
+        .map(([catId, amount]) => ({
+          meta: getCategoryMeta('expense', catId),
+          amount,
+          percent: Math.max(4, Math.round((amount / totalExpense) * 100))
+        }))
+        .sort((a, b) => b.amount - a.amount);
+
+      // Render stacked bar segments
+      barContainer.innerHTML = sortedCategories.map(item => `
+        <div style="width: ${item.percent}%" class="${item.meta.color} h-full transition-all duration-500" title="${item.meta.name}: ${formatRupiah(item.amount)}"></div>
+      `).join('');
+
+      // Render legend pills
+      legendContainer.innerHTML = sortedCategories.map(item => `
+        <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-50 border border-slate-100 text-xs">
+          <span class="w-2 h-2 rounded-full ${item.meta.color}"></span>
+          <span class="font-medium text-slate-700">${item.meta.name}</span>
+          <span class="font-bold text-slate-900">${Math.round((item.amount / totalExpense) * 100)}%</span>
+        </div>
+      `).join('');
+    }
+
+    function renderTransactionList() {
+      const listContainer = document.getElementById('transactionList');
+      const countEl = document.getElementById('transactionCount');
+
+      // Filter & Sort newest first
+      const filtered = transactions
+        .filter(tx => currentFilter === 'all' ? true : tx.type === currentFilter)
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      countEl.textContent = `${filtered.length} catatan`;
+
+      if (filtered.length === 0) {
+        listContainer.innerHTML = `
+          <div class="bg-white rounded-3xl p-8 text-center border border-slate-100">
+            <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
+              <i data-lucide="file-text" class="w-6 h-6"></i>
+            </div>
+            <p class="font-display font-bold text-sm text-slate-700 mb-1">Belum ada catatan</p>
+            <p class="text-xs text-slate-400">Tekan tombol <b>+ Catat Baru</b> di bawah untuk mulai mencatat.</p>
+          </div>
+        `;
+        return;
+      }
+
+      listContainer.innerHTML = filtered.map(tx => {
+        const meta = getCategoryMeta(tx.type, tx.category);
+        const isIncome = tx.type === 'income';
+        const amountPrefix = isIncome ? '+' : '-';
+        const amountColor = isIncome ? 'text-emerald-600' : 'text-slate-900';
+
+        return `
+          <div class="group bg-white hover:bg-slate-50/80 rounded-2xl p-3.5 shadow-2xs border border-slate-100 flex items-center justify-between gap-3 transition-all">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-11 h-11 rounded-2xl ${meta.badgeBg} ${meta.badgeText} flex items-center justify-center shrink-0">
+                <i data-lucide="${meta.icon}" class="w-5 h-5"></i>
+              </div>
+              <div class="min-w-0">
+                <p class="font-semibold text-sm text-slate-900 truncate">${escapeHtml(tx.note)}</p>
+                <div class="flex items-center gap-1.5 text-xs text-slate-400 mt-0.5">
+                  <span class="font-medium text-slate-500">${meta.name}</span>
+                  <span>•</span>
+                  <span>${formatDisplayDate(tx.date)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="font-display font-bold text-sm ${amountColor}">
+                ${amountPrefix}${formatRupiah(tx.amount)}
+              </span>
+              <button onclick="deleteTransaction('${tx.id}')" class="p-2 rounded-xl text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-colors" title="Hapus Catatan">
+                <i data-lucide="trash-2" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // --- INTERACTIONS ---
+    function toggleHideBalance() {
+      isBalanceHidden = !isBalanceHidden;
+      renderSummary();
+      lucide.createIcons();
+    }
+
+    function setFilter(filterType) {
+      currentFilter = filterType;
+      document.querySelectorAll('.filter-chip').forEach(btn => {
+        btn.className = 'filter-chip px-4 py-1.5 rounded-full text-xs font-semibold transition-all bg-white text-slate-600 border border-slate-200 hover:bg-slate-100';
+      });
+      const activeBtn = document.getElementById(`filter-${filterType}`);
+      if (activeBtn) {
+        activeBtn.className = 'filter-chip px-4 py-1.5 rounded-full text-xs font-semibold transition-all bg-slate-900 text-white shadow-sm';
+      }
+      renderTransactionList();
+      lucide.createIcons();
+    }
+
+    // --- ADD MODAL & FORM LOGIC ---
+    function openAddModal() {
+      document.getElementById('transactionForm').reset();
+      document.getElementById('txDate').value = getTodayDateString(0);
+      setTransactionType('expense');
+      document.getElementById('addModal').classList.remove('hidden');
+      setTimeout(() => document.getElementById('txAmount').focus(), 100);
+    }
+
+    function closeAddModal() {
+      document.getElementById('addModal').classList.add('hidden');
+    }
+
+    function setTransactionType(type) {
+      document.getElementById('txType').value = type;
+      const btnExpense = document.getElementById('btnTypeExpense');
+      const btnIncome = document.getElementById('btnTypeIncome');
+
+      if (type === 'expense') {
+        btnExpense.className = 'py-2.5 rounded-xl text-xs font-bold transition-all bg-white text-rose-600 shadow-xs';
+        btnIncome.className = 'py-2.5 rounded-xl text-xs font-bold transition-all text-slate-500 hover:text-slate-700';
+      } else {
+        btnIncome.className = 'py-2.5 rounded-xl text-xs font-bold transition-all bg-white text-emerald-600 shadow-xs';
+        btnExpense.className = 'py-2.5 rounded-xl text-xs font-bold transition-all text-slate-500 hover:text-slate-700';
+      }
+
+      renderCategorySelector(type);
+    }
+
+    function renderCategorySelector(type) {
+      const grid = document.getElementById('categoryGrid');
+      const cats = CATEGORIES[type];
+      const defaultCat = cats[0].id;
+      document.getElementById('txCategory').value = defaultCat;
+
+      grid.innerHTML = cats.map((cat, idx) => `
+        <button 
+          type="button" 
+          onclick="selectCategory('${cat.id}')" 
+          id="cat-btn-${cat.id}"
+          class="cat-option flex flex-col items-center justify-center p-2.5 rounded-2xl border text-center transition-all ${idx === 0 ? 'border-brand-500 bg-brand-50/70 text-brand-700 ring-2 ring-brand-500/20' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}"
+        >
+          <div class="w-8 h-8 rounded-xl ${cat.badgeBg} ${cat.badgeText} flex items-center justify-center mb-1">
+            <i data-lucide="${cat.icon}" class="w-4 h-4"></i>
+          </div>
+          <span class="text-[11px] font-semibold leading-tight line-clamp-1">${cat.name}</span>
+        </button>
+      `).join('');
+
+      lucide.createIcons();
+    }
+
+    function selectCategory(catId) {
+      document.getElementById('txCategory').value = catId;
+      document.querySelectorAll('.cat-option').forEach(btn => {
+        btn.className = 'cat-option flex flex-col items-center justify-center p-2.5 rounded-2xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 text-center transition-all';
+      });
+      const selectedBtn = document.getElementById(`cat-btn-${catId}`);
+      if (selectedBtn) {
+        selectedBtn.className = 'cat-option flex flex-col items-center justify-center p-2.5 rounded-2xl border border-brand-500 bg-brand-50/70 text-brand-700 ring-2 ring-brand-500/20 text-center transition-all';
+      }
+    }
+
+    function handleSaveTransaction(e) {
+      e.preventDefault();
+      const type = document.getElementById('txType').value;
+      const rawAmount = document.getElementById('txAmount').value.replace(/[^0-9]/g, '');
+      const amount = parseInt(rawAmount, 10);
+      const category = document.getElementById('txCategory').value;
+      const note = document.getElementById('txNote').value.trim();
+      const date = document.getElementById('txDate').value;
+
+      if (!amount || amount <= 0) {
+        showToast('Masukkan nominal yang valid');
+        return;
+      }
+
+      const newTx = {
+        id: 'tx-' + Date.now(),
+        type,
+        amount,
+        category,
+        note: note || getCategoryMeta(type, category).name,
+        date
+      };
+
+      transactions.unshift(newTx);
+      saveTransactions();
+      closeAddModal();
+      renderApp();
+      showToast('Catatan berhasil disimpan!');
+    }
+
+    function deleteTransaction(id) {
+      transactions = transactions.filter(tx => tx.id !== id);
+      saveTransactions();
+      renderApp();
+      showToast('Catatan dihapus');
+    }
+
+    // --- DROPDOWN & DATA RESET ---
+    function toggleMenu() {
+      const menu = document.getElementById('dropdownMenu');
+      menu.classList.toggle('hidden');
+    }
+
+    // Close dropdown when clicking outside
+    window.addEventListener('click', (e) => {
+      const menu = document.getElementById('dropdownMenu');
+      const btn = document.getElementById('menuBtn');
+      if (!menu.contains(e.target) && !btn.contains(e.target)) {
+        menu.classList.add('hidden');
+      }
+    });
+
+    function resetSampleData() {
+      document.getElementById('dropdownMenu').classList.add('hidden');
+      transactions = getInitialSampleData();
+      saveTransactions();
+      renderApp();
+      showToast('Data contoh berhasil dimuat ulang');
+    }
+
+    function openConfirmClear() {
+      document.getElementById('dropdownMenu').classList.add('hidden');
+      document.getElementById('confirmModal').classList.remove('hidden');
+    }
+
+    function closeConfirmClear() {
+      document.getElementById('confirmModal').classList.add('hidden');
+    }
+
+    function clearAllData() {
+      transactions = [];
+      saveTransactions();
+      closeConfirmClear();
+      renderApp();
+      showToast('Semua data telah dibersihkan');
+    }
+
+    // --- UTILITIES ---
+    let toastTimeout;
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      document.getElementById('toastMessage').textContent = msg;
+      toast.classList.remove('hidden');
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
+        toast.classList.add('hidden');
+      }, 2600);
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
